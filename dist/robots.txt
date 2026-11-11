@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Disallow: /dashboard
+Disallow: /admin
+Disallow: /user-dashboard
+Disallow: /driver
+Disallow: /customer
+Disallow: /api/
+
+Sitemap: https://goghep.id.vn/sitemap.xml

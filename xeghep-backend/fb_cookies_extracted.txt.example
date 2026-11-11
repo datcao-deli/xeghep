@@ -1,0 +1,1 @@
+# Dán chuỗi cookie Facebook dạng: c_user=...; xs=...; fr=... vào file fb_cookies_extracted.txt (không bắt buộc nếu đã cấu hình biến FB_COOKIE trong .env)

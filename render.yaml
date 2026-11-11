@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: xeghep-app
+    env: python
+    plan: free
+    buildCommand: "pip install -r requirements.txt || pip install -r xeghep-backend/requirements.txt"
+    startCommand: "python main.py || python xeghep-backend/main.py || uvicorn main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: AI_PROVIDER
+        value: gemini
+      - key: MATCH_INTERVAL_MINUTES
+        value: "30"
+      - key: GEMINI_API_KEY_1
+        sync: false
+      - key: FB_COOKIE
+        sync: false
+      - key: THREADS_COOKIE
+        sync: false
+      - key: ZALO_COOKIES
+        sync: false

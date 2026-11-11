@@ -1,0 +1,201 @@
+@import "tailwindcss";
+
+:root {
+  --navy: #0b2a4a;
+  --navy-2: #123a66;
+  --teal: #0f766e;
+  --teal-light: #14b8a6;
+  --ink: #0f172a;
+}
+
+html, body, #root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: "Be Vietnam Pro", ui-sans-serif, system-ui, sans-serif;
+  color: var(--ink);
+  background: radial-gradient(circle at 12% 15%, rgba(15, 118, 110, 0.08) 0%, transparent 45%),
+              radial-gradient(circle at 88% 12%, rgba(11, 42, 74, 0.07) 0%, transparent 50%),
+              radial-gradient(circle at 50% 80%, rgba(20, 184, 166, 0.06) 0%, transparent 45%),
+              #f8fafc;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background-color: #0f766e;
+  color: #ffffff;
+}
+
+/* Glassmorphism Surface Base */
+.glass-card {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  box-shadow: 0 10px 30px -5px rgba(11, 42, 74, 0.06);
+}
+
+/* Hiệu ứng kính mờ nổi lên khi đưa chuột vào (Hover Float / Lift) */
+.glass-hover {
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.glass-hover:hover {
+  transform: translateY(-6px);
+  background: rgba(255, 255, 255, 0.96);
+  border-color: rgba(15, 118, 110, 0.4);
+  box-shadow: 0 22px 45px -10px rgba(11, 42, 74, 0.14),
+              0 0 0 1px rgba(20, 184, 166, 0.18) inset;
+}
+
+/* Dark Glass Surface */
+.glass-dark {
+  background: rgba(11, 42, 74, 0.8);
+  backdrop-filter: blur(28px) saturate(190%);
+  -webkit-backdrop-filter: blur(28px) saturate(190%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.35);
+}
+.glass-dark-hover {
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.glass-dark-hover:hover {
+  transform: translateY(-5px);
+  background: rgba(11, 42, 74, 0.92);
+  border-color: rgba(20, 184, 166, 0.45);
+  box-shadow: 0 25px 50px -10px rgba(0, 0, 0, 0.5),
+              0 0 0 1px rgba(20, 184, 166, 0.25) inset;
+}
+
+/* Glowing Button */
+.glow-btn {
+  background: linear-gradient(135deg, #0b2a4a 0%, #0f766e 100%);
+  box-shadow: 0 8px 20px -4px rgba(15, 118, 110, 0.4),
+              0 0 0 1px rgba(255, 255, 255, 0.15) inset;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.glow-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 28px -4px rgba(15, 118, 110, 0.6),
+              0 0 0 1px rgba(255, 255, 255, 0.3) inset;
+}
+
+/* Glass Pill Badge */
+.glass-pill {
+  background: rgba(204, 251, 241, 0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(20, 184, 166, 0.35);
+}
+
+/* Glass Input */
+.glass-input {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(203, 213, 225, 0.8);
+  transition: all 0.2s ease;
+}
+.glass-input:focus {
+  background: #ffffff;
+  border-color: #0f766e;
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.15);
+  outline: none;
+}
+
+.inp {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(10px);
+  border: 1px solid #d7dee8;
+  border-radius: 0.75rem;
+  font-size: 0.875rem;
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+}
+
+.inp:focus {
+  outline: none;
+  background: #ffffff;
+  border-color: #0f766e;
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.15);
+}
+
+/* Custom scrollbar matching Landing Page palette */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* ============================================================
+   CHẾ ĐỘ IN & XUẤT BÁO CÁO (PRINT STYLESHEET)
+   ============================================================ */
+@page {
+  size: landscape;
+  margin: 5mm 6mm;
+}
+
+@media print {
+  /* Ẩn hoàn toàn thanh menu quản trị và các phần tử điều hướng khi in/xuất PDF */
+  aside,
+  header,
+  .print-hidden,
+  .print\:hidden {
+    display: none !important;
+  }
+
+  /* Khôi phục không gian trắng sạch cho báo cáo */
+  html, body, #root, .min-h-screen {
+    background: #ffffff !important;
+    color: #0f172a !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    min-height: auto !important;
+    height: auto !important;
+  }
+
+  main {
+    margin: 0 !important;
+    padding: 0 !important;
+    max-width: 100% !important;
+    width: 100% !important;
+  }
+
+  /* Chỉ tránh ngắt đôi dòng giữa chừng trong bảng dữ liệu */
+  tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Ngắt trang chuẩn giữa Trang 1 và Trang 2 */
+  .print-page-break {
+    break-before: page !important;
+    page-break-before: always !important;
+  }
+
+  /* Tránh ngắt vỡ giữa chừng bên trong từng phần */
+  .print-section {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+
+  /* Loại bỏ bóng mờ đổ bóng khi in để chữ và biểu đồ sắc nét */
+  .shadow-sm,
+  .shadow-xs,
+  .shadow-md,
+  .shadow-lg,
+  .shadow-\[0_2px_12px_rgba\(0\,0\,0\,0\.03\)\] {
+    box-shadow: none !important;
+  }
+}
