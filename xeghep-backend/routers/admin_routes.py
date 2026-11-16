@@ -145,7 +145,9 @@ async def update_admin_user(user_id: int, data: AdminUpdateUserIn, admin=Depends
         if not existing:
             raise HTTPException(status_code=404, detail="Không tìm thấy người dùng")
 
-        if sdt_clean:
+        curr_user_dict = dict(existing)
+        existing_sdt = _normalize_phone_vn(curr_user_dict.get("sdt") or "")
+        if sdt_clean and sdt_clean != existing_sdt:
             phone_taken = db.execute(
                 "SELECT id FROM users WHERE (sdt = ? OR sdt = ?) AND id != ?",
                 (sdt_clean, "84" + sdt_clean[1:] if sdt_clean.startswith("0") else sdt_clean, user_id)

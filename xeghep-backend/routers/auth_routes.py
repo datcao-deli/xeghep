@@ -219,11 +219,13 @@ async def update_user_profile(data: UserProfileUpdateIn, user=Depends(current_us
         if not new_ho_ten:
             raise HTTPException(status_code=400, detail="Họ tên không được để trống")
         
+        curr_clean_sdt = _normalize_phone_vn(curr_dict.get("sdt") or "")
         if data.sdt is not None:
             clean_sdt = _normalize_phone_vn(data.sdt)
             if clean_sdt and not re.match(r"^0\d{9}$", clean_sdt):
                 raise HTTPException(status_code=400, detail="Số điện thoại phải có đúng 10 chữ số và bắt đầu bằng số 0")
-            if clean_sdt:
+            # Chỉ kiểm tra trùng số nếu người dùng thay đổi sang số điện thoại khác
+            if clean_sdt and clean_sdt != curr_clean_sdt:
                 phone_taken = db.execute(
                     "SELECT id FROM users WHERE (sdt = ? OR sdt = ?) AND id != ?",
                     (clean_sdt, "84" + clean_sdt[1:], user_id),

@@ -483,8 +483,13 @@ export default function CustomerDashboard() {
     try {
       const res = await api.updateProfile({ ho_ten: profileName.trim(), sdt: cleanPhone });
       syncPhone(cleanPhone);
-      setCurrentName(res?.ho_ten || profileName.trim());
+      const newName = res?.ho_ten || profileName.trim();
+      setCurrentName(newName);
+      localStorage.setItem('userName', newName);
+      localStorage.setItem('userHoTen', newName);
+      window.dispatchEvent(new Event('authChange'));
       showToast('✅ Đã lưu thông tin hành khách thành công!');
+      setUserProfileModalOpen(false);
     } catch (err) {
       showToast(err.message || 'Lỗi khi cập nhật thông tin');
     } finally {
