@@ -130,6 +130,10 @@ export default function CustomerDashboard() {
 
   // Modal quản lý tài khoản & ảnh đại diện
   const [userProfileModalOpen, setUserProfileModalOpen] = useState(false);
+  const isProfileModalOpenRef = useRef(false);
+  useEffect(() => {
+    isProfileModalOpenRef.current = userProfileModalOpen;
+  }, [userProfileModalOpen]);
   const avatarInputRef = useRef(null);
   const [profileAvatar, setProfileAvatar] = useState(session.avatarUrl || localStorage.getItem('userAvatar') || '');
   const [currentName, setCurrentName] = useState(session.hoTen || 'Khách hàng');
@@ -243,11 +247,15 @@ export default function CustomerDashboard() {
       if (pRes.status === 'fulfilled' && pRes.value) {
         if (pRes.value.ho_ten) {
           setCurrentName(pRes.value.ho_ten);
-          setProfileName(pRes.value.ho_ten);
           localStorage.setItem('userName', pRes.value.ho_ten);
+          if (!isProfileModalOpenRef.current) {
+            setProfileName(pRes.value.ho_ten);
+          }
         }
         if (pRes.value.sdt) {
-          syncPhone(pRes.value.sdt);
+          if (!isProfileModalOpenRef.current) {
+            syncPhone(pRes.value.sdt);
+          }
         }
         if (pRes.value.avatar_url) {
           setProfileAvatar(pRes.value.avatar_url);
@@ -752,7 +760,10 @@ export default function CustomerDashboard() {
             <div className="relative inline-block mx-auto mb-2 group">
               <button
                 type="button"
-                onClick={() => setUserProfileModalOpen(true)}
+                onClick={() => {
+                  setProfileName(currentName || session.hoTen || '');
+                  setUserProfileModalOpen(true);
+                }}
                 title="Nhấn vào để thay đổi thông tin hoặc đổi ảnh đại diện"
                 className="w-16 h-16 rounded-full bg-[#dcfce7] text-[#065f46] font-bold text-2xl flex items-center justify-center overflow-hidden shadow-xs cursor-pointer ring-2 ring-transparent hover:ring-[#0f766e] transition-all duration-200 relative group"
               >
@@ -770,7 +781,10 @@ export default function CustomerDashboard() {
               HÀNH KHÁCH
             </div>
             <h3
-              onClick={() => setUserProfileModalOpen(true)}
+              onClick={() => {
+                setProfileName(currentName || session.hoTen || '');
+                setUserProfileModalOpen(true);
+              }}
               className="text-base font-bold text-[#0b2a4a] leading-tight cursor-pointer hover:text-[#0f766e] transition"
             >
               {displayUserName}

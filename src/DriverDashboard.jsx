@@ -161,6 +161,10 @@ export default function DriverDashboard() {
 
   // Modal tài khoản
   const [userProfileModalOpen, setUserProfileModalOpen] = useState(false);
+  const isProfileModalOpenRef = useRef(false);
+  useEffect(() => {
+    isProfileModalOpenRef.current = userProfileModalOpen;
+  }, [userProfileModalOpen]);
   const avatarInputRef = useRef(null);
   const [profileAvatar, setProfileAvatar] = useState(session.avatarUrl || localStorage.getItem('userAvatar') || '');
   const [currentName, setCurrentName] = useState(session.hoTen || 'Bác tài');
@@ -340,11 +344,15 @@ export default function DriverDashboard() {
       if (pRes.status === 'fulfilled' && pRes.value) {
         if (pRes.value.ho_ten) {
           setCurrentName(pRes.value.ho_ten);
-          setProfileName(pRes.value.ho_ten);
           localStorage.setItem('userName', pRes.value.ho_ten);
+          if (!isProfileModalOpenRef.current) {
+            setProfileName(pRes.value.ho_ten);
+          }
         }
         if (pRes.value.sdt) {
-          syncPhone(pRes.value.sdt);
+          if (!isProfileModalOpenRef.current) {
+            syncPhone(pRes.value.sdt);
+          }
         }
         if (pRes.value.avatar_url) {
           setProfileAvatar(pRes.value.avatar_url);
