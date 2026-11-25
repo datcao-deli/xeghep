@@ -980,7 +980,8 @@ export default function Dashboard() {
     return trips.map((t) => ({ ...t, _meta: parseScheduleMeta(t.thoi_gian_chay, t.bai_viet_thoi_gian || t.ngay_tao) })).filter((t) => {
       const isExp = t._meta.isExpired || t.trang_thai === 'het_han';
       const isFull = t.so_ghe_trong <= 0 || t.trang_thai === 'da_day';
-      if (hideExpiredTrips && (isExp || isFull)) return false;
+      const isClosed = t.trang_thai === 'hoan_thanh' || t.trang_thai === 'da_huy';
+      if (hideExpiredTrips && (isExp || isFull || isClosed)) return false;
       if (tripStatusFilter === 'all') return true;
       if (tripStatusFilter === 'qua_han') return isExp;
       if (tripStatusFilter === 'da_day') return isFull;
@@ -996,7 +997,8 @@ export default function Dashboard() {
       .filter((r) => {
         const isExp = r._meta.isExpired || r.trang_thai === 'het_han';
         const isMatched = r.trang_thai === 'da_ghep' || r.trang_thai === 'da_nhan';
-        if (hideExpiredRequests && (isExp || isMatched)) return false;
+        const isClosed = r.trang_thai === 'hoan_thanh' || r.trang_thai === 'da_huy';
+        if (hideExpiredRequests && (isExp || isMatched || isClosed)) return false;
         if (requestStatusFilter === 'all') return true;
         if (requestStatusFilter === 'qua_han') return isExp;
         if (requestStatusFilter === 'da_ghep') return isMatched;
