@@ -189,7 +189,7 @@ class ZaloHTTPCrawler:
         if ZALO_COOKIES:
             self.headers["Cookie"] = ZALO_COOKIES
 
-    def gui_bai(self, text: str) -> bool:
+    def gui_bai(self, text: str) -> str:
         payload = {
             "noi_dung_tho": text,
             "nguon": "zalo",
@@ -198,17 +198,29 @@ class ZaloHTTPCrawler:
         try:
             if requests:
                 r = requests.post(BACKEND_API_URL, json=payload, timeout=25, verify=False)
-                return r.status_code == 200
+                if r.status_code == 200:
+                    try:
+                        body = r.json()
+                        return "dup" if body.get("trung") else "new"
+                    except Exception:
+                        return "new"
+                return "err"
         except Exception:
             pass
         try:
             data_bytes = json.dumps(payload).encode("utf-8")
             req = urllib_req.Request(BACKEND_API_URL, data=data_bytes, headers={"Content-Type": "application/json"})
             with urllib_req.urlopen(req, timeout=10, context=_ssl_context) as r:
-                return r.status == 200
+                if r.status == 200:
+                    try:
+                        body = json.loads(r.read().decode("utf-8", errors="ignore"))
+                        return "dup" if body.get("trung") else "new"
+                    except Exception:
+                        return "new"
+                return "err"
         except Exception as e:
             print(f"⚠️ Lỗi gửi tin nhắn Zalo về Backend ({BACKEND_API_URL}): {e}")
-            return False
+            return "err"
 
     def poll_recent_messages(self):
         """Lấy danh sách tin nhắn mới từ API Zalo Web"""
@@ -247,10 +259,12 @@ class ZaloHTTPCrawler:
         return messages
 
     def chay(self):
+        min_new_target = int(os.getenv("MIN_NEW_POSTS_PER_CYCLE", "6"))
         print("=" * 65)
         print("🚀 KHỞI ĐỘNG BOT ZALO SIÊU NHẸ (HTTP POLLER)")
         print(f"📡 Backend Endpoint: {BACKEND_API_URL}")
         print(f"🔑 Trạng thái Cookie Zalo: {'Đã cấu hình' if ZALO_COOKIES else 'Chưa cấu hình (cần dán ZALO_COOKIES vào .env)'}")
+        print(f"🎯 Mục tiêu mỗi chu kỳ: tối thiểu {min_new_target} bài viết MỚI")
         print("=" * 65)
 
         while True:
@@ -261,13 +275,15 @@ class ZaloHTTPCrawler:
                     if not any(m in exist or exist in m for exist in hop_le):
                         hop_le.append(m)
 
+            moi_count = 0
             if hop_le:
-                print(f"✅ Tìm thấy {len(hop_le)} tin nhắn xe ghép mới trên Zalo.")
                 for b in hop_le:
-                    self.gui_bai(b)
+                    if self.gui_bai(b) == "new":
+                        moi_count += 1
+                print(f"✅ Tìm thấy {len(hop_le)} tin nhắn xe ghép ({moi_count} bài mới lưu DB).")
 
             phut_nghi = round(CRAWL_INTERVAL_SECONDS / 60)
-            print(f"\n🎉 Hoàn thành một chu kỳ Zalo. Nghỉ {phut_nghi} phút ({CRAWL_INTERVAL_SECONDS}s) trước chu kỳ mới...")
+            print(f"\n🎉 Hoàn thành một chu kỳ Zalo ({moi_count} bài MỚI / mục tiêu >= {min_new_target}). Nghỉ {phut_nghi} phút ({CRAWL_INTERVAL_SECONDS}s) trước chu kỳ mới...")
             sleep(CRAWL_INTERVAL_SECONDS)
 
 

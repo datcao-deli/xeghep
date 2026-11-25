@@ -335,8 +335,8 @@ class FacebookHTTPCrawler:
         with urllib_req.urlopen(req, timeout=15, context=_ssl_context) as resp:
             return resp.read().decode("utf-8", errors="ignore")
 
-    def gui_bai_viet_ve_backend(self, text: str) -> bool:
-        """Gửi bài viết đạt chuẩn về FastAPI Backend."""
+    def gui_bai_viet_ve_backend(self, text: str) -> str:
+        """Gửi bài viết đạt chuẩn về FastAPI Backend và phân biệt bài mới thật sự."""
         payload = {
             "noi_dung_tho": text,
             "nguon": "facebook",
@@ -345,7 +345,13 @@ class FacebookHTTPCrawler:
         try:
             if requests:
                 r = requests.post(BACKEND_API_URL, json=payload, timeout=25, verify=False)
-                return r.status_code == 200
+                if r.status_code == 200:
+                    try:
+                        body = r.json()
+                        return "dup" if body.get("trung") else "new"
+                    except Exception:
+                        return "new"
+                return "err"
         except Exception:
             pass
         try:
@@ -353,12 +359,18 @@ class FacebookHTTPCrawler:
             data_bytes = json.dumps(payload).encode("utf-8")
             req = urllib_req.Request(BACKEND_API_URL, data=data_bytes, headers={"Content-Type": "application/json"})
             with urllib_req.urlopen(req, timeout=10, context=_ssl_context) as r:
-                return r.status == 200
+                if r.status == 200:
+                    try:
+                        body = json.loads(r.read().decode("utf-8", errors="ignore"))
+                        return "dup" if body.get("trung") else "new"
+                    except Exception:
+                        return "new"
+                return "err"
         except Exception as e:
             print(f"⚠️ Lỗi gửi bài về Backend ({BACKEND_API_URL}): {e}")
-            return False
+            return "err"
 
-    def _quet_danh_sach_url(self, scan_label: str, found_label: str, urls_to_try: list) -> int:
+    def _quet_danh_sach_url(self, scan_label: str, found_label: str, urls_to_try: list) -> tuple:
         """Quét lần lượt danh sách URL dự phòng và gửi các bài viết đạt chuẩn về Backend."""
         print(f"\n{scan_label}...")
         for url in urls_to_try:
@@ -373,56 +385,69 @@ class FacebookHTTPCrawler:
                             hop_le.append(b)
 
                 if hop_le:
-                    print(f"✅ Tìm thấy {len(hop_le)} bài viết đạt chuẩn {found_label}.")
+                    moi_count = 0
                     for bai in hop_le:
-                        self.gui_bai_viet_ve_backend(bai)
-                    return len(hop_le)
+                        if self.gui_bai_viet_ve_backend(bai) == "new":
+                            moi_count += 1
+                    print(f"✅ Tìm thấy {len(hop_le)} bài đạt chuẩn ({moi_count} bài mới lưu DB) {found_label}.")
+                    return moi_count, len(hop_le)
             except Exception:
                 pass
-        return 0
+        return 0, 0
 
     def chay(self):
+        min_new_target = int(os.getenv("MIN_NEW_POSTS_PER_CYCLE", "6"))
         print("=" * 65)
         print("🚀 KHỞI ĐỘNG BOT FACEBOOK SIÊU NHẸ (HTTP REQUESTS - CLOUD RENDER)")
         print(f"📡 Backend Endpoint: {BACKEND_API_URL}")
         has_cookie = bool(load_fb_cookie())
         print(f"🔑 Trạng thái Cookie FB: {'Đã cấu hình' if has_cookie else 'Chưa cấu hình (đang cào chế độ công khai)'}")
+        print(f"🎯 Mục tiêu mỗi chu kỳ: tối thiểu {min_new_target} bài viết MỚI")
         print(f"⏱️ Chu kỳ quét dữ liệu: {round(CRAWL_INTERVAL_SECONDS / 60)} phút ({CRAWL_INTERVAL_SECONDS}s / 1 lần)")
         print("=" * 65)
 
         while True:
+            tong_bai_moi = 0
             tong_bai_hop_le = 0
+            has_cookie = bool(load_fb_cookie())
 
-            # 1. Quét tìm kiếm từ khóa TRƯỚC (bắt bài diện rộng từ mọi nguồn công khai & trang cá nhân)
-            for kw in tu_khoa_tim_kiem:
-                q_encoded = urllib.parse.quote(kw)
-                urls_to_try = [
-                    f"https://mbasic.facebook.com/search/posts?q={q_encoded}&filters=eyJyZWNlbnRfcG9zdHM6MCI6IntcIm5hbWVcIjpcInJlY2VudF9wb3N0c1wiLFwiYXJnc1wiOlwiXCJ9In0%3D",
-                    f"https://m.facebook.com/search/posts?q={q_encoded}",
-                ]
-                tong_bai_hop_le += self._quet_danh_sach_url(
-                    f"🔍 [TÌM KIẾM FB] Đang quét từ khóa: '{kw}'",
-                    f"với từ khóa '{kw}'",
-                    urls_to_try,
-                )
-                sleep(3)
-
-            # 2. Quét các nhóm xe ghép SAU (quét bổ sung các hội nhóm chỉ định)
+            # 1. Quét các nhóm xe ghép công khai TRƯỚC (tránh kích checkpoint sớm từ trang search)
             for nhom in danh_sach_nhom_facebook:
                 urls_to_try = [
                     f"https://mbasic.facebook.com/groups/{nhom}?sorting_setting=CHRONOLOGICAL",
                     f"https://m.facebook.com/groups/{nhom}",
                 ]
-                tong_bai_hop_le += self._quet_danh_sach_url(
+                moi, tong = self._quet_danh_sach_url(
                     f"🚀 [NHÓM FB] Đang quét: {nhom}",
                     f"từ nhóm {nhom}",
                     urls_to_try,
                 )
+                tong_bai_moi += moi
+                tong_bai_hop_le += tong
                 sleep(3)
 
+            # 2. Chỉ quét tìm kiếm từ khóa SAU nếu có cookie và chưa đạt mục tiêu >= 6 bài mới
+            if has_cookie and tong_bai_moi < min_new_target:
+                print(f"\n🔄 Hiện mới có {tong_bai_moi}/{min_new_target} bài mới từ nhóm — mở rộng quét tìm kiếm từ khóa...")
+                for kw in tu_khoa_tim_kiem:
+                    if tong_bai_moi >= min_new_target:
+                        break
+                    q_encoded = urllib.parse.quote(kw)
+                    urls_to_try = [
+                        f"https://mbasic.facebook.com/search/posts?q={q_encoded}&filters=eyJyZWNlbnRfcG9zdHM6MCI6IntcIm5hbWVcIjpcInJlY2VudF9wb3N0c1wiLFwiYXJnc1wiOlwiXCJ9In0%3D",
+                        f"https://m.facebook.com/search/posts?q={q_encoded}",
+                    ]
+                    moi, tong = self._quet_danh_sach_url(
+                        f"🔍 [TÌM KIẾM FB] Đang quét từ khóa: '{kw}'",
+                        f"với từ khóa '{kw}'",
+                        urls_to_try,
+                    )
+                    tong_bai_moi += moi
+                    tong_bai_hop_le += tong
+                    sleep(3)
 
             phut_nghi = round(CRAWL_INTERVAL_SECONDS / 60)
-            print(f"\n🎉 Hoàn thành chu kỳ quét Facebook ({tong_bai_hop_le} bài mới gửi về). Nghỉ {phut_nghi} phút ({CRAWL_INTERVAL_SECONDS}s) trước chu kỳ mới...")
+            print(f"\n🎉 Hoàn thành chu kỳ quét Facebook ({tong_bai_moi} bài MỚI lưu DB / {tong_bai_hop_le} bài hợp lệ; mục tiêu >= {min_new_target}). Nghỉ {phut_nghi} phút ({CRAWL_INTERVAL_SECONDS}s)...")
             _start_sleep = time.time()
             while time.time() - _start_sleep < CRAWL_INTERVAL_SECONDS:
                 sleep(5)

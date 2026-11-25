@@ -271,7 +271,7 @@ class ThreadsHTTPCrawler:
         with urllib_req.urlopen(req, timeout=15, context=_ssl_context) as resp:
             return resp.read().decode("utf-8", errors="ignore")
 
-    def gui_bai(self, text: str) -> bool:
+    def gui_bai(self, text: str) -> str:
         payload = {
             "noi_dung_tho": text,
             "nguon": "threads",
@@ -280,77 +280,109 @@ class ThreadsHTTPCrawler:
         try:
             if requests:
                 r = requests.post(BACKEND_API_URL, json=payload, timeout=25, verify=False)
-                return r.status_code == 200
+                if r.status_code == 200:
+                    try:
+                        body = r.json()
+                        return "dup" if body.get("trung") else "new"
+                    except Exception:
+                        return "new"
+                return "err"
         except Exception:
             pass
         try:
             data_bytes = json.dumps(payload).encode("utf-8")
             req = urllib_req.Request(BACKEND_API_URL, data=data_bytes, headers={"Content-Type": "application/json"})
             with urllib_req.urlopen(req, timeout=10, context=_ssl_context) as r:
-                return r.status == 200
+                if r.status == 200:
+                    try:
+                        body = json.loads(r.read().decode("utf-8", errors="ignore"))
+                        return "dup" if body.get("trung") else "new"
+                    except Exception:
+                        return "new"
+                return "err"
         except Exception as e:
             print(f"⚠️ Lỗi gửi bài Threads về Backend ({BACKEND_API_URL}): {e}")
-            return False
+            return "err"
+
+    def _quet_mot_url(self, url: str, label: str) -> tuple:
+        moi_count = 0
+        tong_count = 0
+        print(f"\n{label}...")
+        try:
+            html_code = self.get_html(url)
+            bai_viets = extract_threads_posts(html_code)
+
+            hop_le = []
+            for b in bai_viets:
+                if kiem_tra_bai_viet_hop_le(b):
+                    if not any(b in exist or exist in b for exist in hop_le):
+                        hop_le.append(b)
+
+            for b in hop_le:
+                st = self.gui_bai(b)
+                if st == "new":
+                    moi_count += 1
+            tong_count = len(hop_le)
+            print(f"✅ Tìm thấy {tong_count} bài đạt chuẩn ({moi_count} bài mới lưu DB) từ {url}.")
+        except Exception as e:
+            print(f"⚠️ Lỗi quét Threads {url}: {e}")
+        return moi_count, tong_count
 
     def chay(self):
+        min_new_target = int(os.getenv("MIN_NEW_POSTS_PER_CYCLE", "6"))
         print("=" * 65)
         print("🚀 KHỞI ĐỘNG BOT THREADS SIÊU NHẸ (HTTP REQUESTS)")
         print(f"📡 Backend Endpoint: {BACKEND_API_URL}")
+        print(f"🎯 Mục tiêu mỗi chu kỳ: tối thiểu {min_new_target} bài viết MỚI")
         print("=" * 65)
 
+        profile_urls = [u for u in nguon_cong_khai_threads if "/@" in u]
+        tag_urls = [u for u in nguon_cong_khai_threads if "/tag/" in u]
+
         while True:
-            tong_bai = 0
+            tong_bai_moi = 0
+            tong_bai_gui = 0
 
-            # 1. Quét theo các Hashtag và trang nhà xe
-            for url in nguon_cong_khai_threads:
-                print(f"\n🚀 [NGUỒN THREADS] Đang quét: {url}...")
-                try:
-                    html_code = self.get_html(url)
-                    bai_viets = extract_threads_posts(html_code)
-
-                    hop_le = []
-                    for b in bai_viets:
-                        if kiem_tra_bai_viet_hop_le(b):
-                            if not any(b in exist or exist in b for exist in hop_le):
-                                hop_le.append(b)
-
-                    print(f"✅ Tìm thấy {len(hop_le)} bài viết đạt chuẩn từ {url}.")
-                    for b in hop_le:
-                        self.gui_bai(b)
-                    tong_bai += len(hop_le)
-
-                except Exception as e:
-                    print(f"⚠️ Lỗi quét Threads {url}: {e}")
-
-                sleep(2.5)
-
-            # 2. Quét theo từ khóa tìm kiếm Threads
-            for kw in tu_khoa_tim_kiem_threads[:6]:
+            # 1. Quét toàn bộ danh sách từ khóa tìm kiếm (mở rộng hết 24 từ khóa, không cắt [:6])
+            for kw in tu_khoa_tim_kiem_threads:
                 kw_enc = urllib.parse.quote(kw)
                 url = f"https://www.threads.net/search?q={kw_enc}&serp_type=default"
-                print(f"\n🔍 [TÌM KIẾM THREADS] Đang quét từ khóa: '{kw}'...")
-                try:
-                    html_code = self.get_html(url)
-                    bai_viets = extract_threads_posts(html_code)
+                moi, tong = self._quet_mot_url(url, f"🔍 [TÌM KIẾM THREADS] Đang quét từ khóa: '{kw}'")
+                tong_bai_moi += moi
+                tong_bai_gui += tong
+                sleep(2.5)
 
-                    hop_le = []
-                    for b in bai_viets:
-                        if kiem_tra_bai_viet_hop_le(b):
-                            if not any(b in exist or exist in b for exist in hop_le):
-                                hop_le.append(b)
+            # 2. Quét các tài khoản nhà xe công khai
+            for url in profile_urls:
+                moi, tong = self._quet_mot_url(url, f"🚀 [TÀI KHOẢN THREADS] Đang quét: {url}")
+                tong_bai_moi += moi
+                tong_bai_gui += tong
+                sleep(2.5)
 
-                    print(f"✅ Tìm thấy {len(hop_le)} bài viết đạt chuẩn cho từ khóa '{kw}'.")
-                    for b in hop_le:
-                        self.gui_bai(b)
-                    tong_bai += len(hop_le)
+            # 3. Nếu chưa đạt mục tiêu tối thiểu 6 bài mới -> quét sâu thêm chế độ recent & các trang tag
+            if tong_bai_moi < min_new_target:
+                print(f"\n🔄 Hiện mới có {tong_bai_moi}/{min_new_target} bài mới — mở rộng quét chế độ bài mới nhất (recent)...")
+                for kw in tu_khoa_tim_kiem_threads:
+                    if tong_bai_moi >= min_new_target:
+                        break
+                    kw_enc = urllib.parse.quote(kw)
+                    url = f"https://www.threads.net/search?q={kw_enc}&serp_type=default&filter=recent"
+                    moi, tong = self._quet_mot_url(url, f"🆕 [RECENT THREADS] Quét bài mới nhất: '{kw}'")
+                    tong_bai_moi += moi
+                    tong_bai_gui += tong
+                    sleep(2.5)
 
-                except Exception as e:
-                    print(f"⚠️ Lỗi tìm kiếm Threads '{kw}': {e}")
-
-                sleep(3)
+            if tong_bai_moi < min_new_target:
+                for url in tag_urls:
+                    if tong_bai_moi >= min_new_target:
+                        break
+                    moi, tong = self._quet_mot_url(url, f"🏷️ [TAG THREADS] Đang quét: {url}")
+                    tong_bai_moi += moi
+                    tong_bai_gui += tong
+                    sleep(2.5)
 
             phut_nghi = round(CRAWL_INTERVAL_SECONDS / 60)
-            print(f"\n🎉 Hoàn thành chu kỳ quét Threads ({tong_bai} bài mới). Nghỉ {phut_nghi} phút ({CRAWL_INTERVAL_SECONDS}s) trước chu kỳ mới...")
+            print(f"\n🎉 Hoàn thành chu kỳ quét Threads ({tong_bai_moi} bài MỚI lưu DB / {tong_bai_gui} bài hợp lệ; mục tiêu >= {min_new_target}). Nghỉ {phut_nghi} phút ({CRAWL_INTERVAL_SECONDS}s)...")
             _start_sleep = time.time()
             while time.time() - _start_sleep < CRAWL_INTERVAL_SECONDS:
                 sleep(5)
