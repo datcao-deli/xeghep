@@ -179,7 +179,7 @@ cp .env.example .env
 | `AUTO_START_CRAWLERS` | `false` *(trong `.env.example`)* | Bật/tắt tự khởi động 3 bot khi server mở (`true` / `false`; nếu không tạo `.env` backend mặc định `true`) |
 | `FB_COOKIE` / `FB_CRAWL_INTERVAL` | `""` / `1800` | Cookie và chu kỳ quét Facebook (giây, `1800` = 30 phút) |
 | `THREADS_COOKIE` / `THREADS_CRAWL_INTERVAL` | `""` / `1800` | Cookie và chu kỳ quét Threads (giây) |
-| `ZALO_COOKIES` / `ZALO_CRAWL_INTERVAL` | `""` / `1800` | Cookie và chu kỳ quét Zalo (giây) |
+| `ZALO_COOKIES` / `ZALO_IMEI` | `""` / `""` | Cookie và IMEI phiên Zalo Web (bắt buộc đủ cả 2 để bot Zalo kết nối WebSocket realtime) |
 | `PING_URL` | *(chỉ dùng trên Cloud)* | URL health-check chống ngủ đông; mặc định bỏ qua khi chạy cục bộ |
 
 ---
@@ -199,9 +199,11 @@ Hệ thống tích hợp sẵn trình quản lý tiến trình bot chéo nền t
   - Dán vào `.env`: `FB_COOKIE="c_user=...; xs=...; ..."`
   - *Hoặc* tạo file `xeghep-backend/fb_cookies_extracted.txt` dựa theo mẫu `xeghep-backend/fb_cookies_extracted.txt.example` rồi dán nguyên chuỗi cookie vào đó.
   - *(Nếu bỏ trống cookie, bot vẫn chạy chế độ công khai nhưng Facebook thường yêu cầu đăng nhập khi tìm bài viết hoặc vào nhóm).*
-- **Zalo (`ZALO_COOKIES` — Bắt buộc nếu chạy Bot Zalo)**:
+- **Zalo (`ZALO_COOKIES` + `ZALO_IMEI` — Bắt buộc đủ cả 2 để chạy Bot Zalo)**:
   - Lấy chuỗi cookie khi đang mở `https://chat.zalo.me` và dán vào `.env`: `ZALO_COOKIES="..."`.
-  - Nếu thiếu `ZALO_COOKIES`, Bot Zalo sẽ bỏ qua chu kỳ quét thay vì báo lỗi.
+  - Lấy `ZALO_IMEI`: ngay trong tab **Network** của DevTools trên `https://chat.zalo.me`, lọc từ khóa **`getServerInfo`** (hoặc `imei`) $\rightarrow$ mở request đầu tiên $\rightarrow$ tab **Payload** $\rightarrow$ copy giá trị `imei` (dạng `uuid-md5`) dán vào `ZALO_IMEI="..."`.
+  - Bot Zalo dùng giao thức Zalo Web (`getLoginInfo` + WebSocket AES-GCM realtime, tự phân trang đồng bộ tin nhóm mới nhất và nghe tin đến trực tiếp). Không đăng xuất phiên `chat.zalo.me` trên trình duyệt sau khi lấy cookie/IMEI.
+  - Nếu thiếu `ZALO_COOKIES` hoặc `ZALO_IMEI`, Bot Zalo sẽ ở trạng thái chờ mà không báo lỗi.
 - **Threads (`THREADS_COOKIE`)**:
   - Có thể cào công khai theo danh sách tag/tài khoản, tuy nhiên nên thêm `THREADS_COOKIE="..."` vào `.env` để giảm bị giới hạn truy cập.
 - Đặt `AUTO_START_CRAWLERS=true` trong `.env` nếu muốn cả 3 bot tự chạy ngay khi khởi động backend.
@@ -246,7 +248,7 @@ git commit -m "mo_ta_ngan_gon_thay_doi"
 git push origin main
 ```
 
-Render được cấu hình qua `render.yaml` sẽ tự động lấy commit mới trên `main` và cập nhật lại dịch vụ sau vài phút *(lưu ý trên Render cần điền các biến môi trường như `GEMINI_API_KEY_1`, `FB_COOKIE`, `THREADS_COOKIE`, `ZALO_COOKIES`, và `MYSQL_*` trong mục Environment của Web Service)*.
+Render được cấu hình qua `render.yaml` sẽ tự động lấy commit mới trên `main` và cập nhật lại dịch vụ sau vài phút *(lưu ý trên Render cần điền các biến môi trường như `GEMINI_API_KEY_1`, `FB_COOKIE`, `THREADS_COOKIE`, `ZALO_COOKIES`, `ZALO_IMEI`, và `MYSQL_*` trong mục Environment của Web Service)*.
 
 ---
 
