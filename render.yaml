@@ -20,3 +20,5 @@ services:
         sync: false
       - key: ZALO_COOKIES
         sync: false
+      - key: ZALO_IMEI
+        sync: false
