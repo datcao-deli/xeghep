@@ -257,6 +257,8 @@ class ZaloHTTPCrawler:
         if ZALO_COOKIES:
             self.headers["Cookie"] = ZALO_COOKIES
         self._seen_msg_ids = set()
+        self._last_action_id = 0
+        self._last_global_msg_id = 0
 
     def gui_bai(self, text: str) -> str:
         payload = {
@@ -371,22 +373,29 @@ class ZaloHTTPCrawler:
                     texts.append(txt)
         return texts
 
-    async def _poll_once_async(self, ws_base: str) -> list:
-        ws_url = f"{ws_base}/?zpw_ver={ZALO_CLIENT_VERSION}&zpw_type={ZALO_TYPE}&t={int(time.time() * 1000)}"
-        messages = []
-        async with self._ws_connect(ws_url) as ws:
-            raw = await asyncio.wait_for(ws.recv(), timeout=10)
-            body = json.loads(raw[4:].decode("utf-8"))
-            cipher_key = body.get("key")
-            if not cipher_key:
-                raise RuntimeError("Không nhận được cipher_key từ Zalo WebSocket")
-
-            # Kéo 50 tin nhắn nhóm gần nhất (cmd=511, sub=0)
-            await ws.send(_make_ws_frame(1, 511, 0, {"blockId": 0, "globalMsgId": 0, "lastActionId": 0}))
-            deadline = time.time() + 6
+    async def _sync_offline_pages_async(self, ws, cipher_key: str, max_pages: int = 80) -> list:
+        """Phân trang cmd=511 từ _last_action_id đến tin mới nhất (more == 0)."""
+        collected = []
+        for _ in range(max_pages):
+            await ws.send(
+                _make_ws_frame(
+                    1,
+                    511,
+                    0,
+                    {
+                        "lastId": self._last_action_id,
+                        "preIds": [],
+                        "blockId": 0,
+                        "globalMsgId": self._last_global_msg_id,
+                        "lastActionId": self._last_action_id,
+                    },
+                )
+            )
+            got_511 = False
+            deadline = time.time() + 10
             while time.time() < deadline:
                 try:
-                    frame = await asyncio.wait_for(ws.recv(), timeout=2.5)
+                    frame = await asyncio.wait_for(ws.recv(), timeout=5)
                 except asyncio.TimeoutError:
                     break
                 if not isinstance(frame, bytes) or len(frame) < 4:
@@ -396,15 +405,45 @@ class ZaloHTTPCrawler:
                 if b.get("data"):
                     try:
                         dec = _decrypt_ws_payload(b["data"], cipher_key, b.get("encrypt", 0))
-                        messages.extend(self._extract_group_texts_from_frame(dec))
+                        collected.extend(self._extract_group_texts_from_frame(dec))
+                        if cmd == 511:
+                            d = dec.get("data", dec)
+                            gmsgs = d.get("groupMsgs", []) if isinstance(d, dict) else []
+                            new_action = int(
+                                (d.get("lastActionId") if isinstance(d, dict) else 0)
+                                or (gmsgs[-1].get("actionId") if gmsgs else 0)
+                                or self._last_action_id
+                            )
+                            new_gmsg = int(
+                                (gmsgs[-1].get("msgId") if gmsgs else 0) or self._last_global_msg_id
+                            )
+                            more = d.get("more", 0) if isinstance(d, dict) else 0
+                            stuck = (new_action == self._last_action_id and new_gmsg == self._last_global_msg_id)
+                            self._last_action_id = new_action
+                            self._last_global_msg_id = new_gmsg
+                            got_511 = True
+                            if not more or not gmsgs or stuck:
+                                return collected
+                            break
                     except Exception:
-                        pass
-                if cmd == 511:
-                    break
-        return messages
+                        if cmd == 511:
+                            return collected
+            if not got_511:
+                break
+        return collected
+
+    async def _poll_once_async(self, ws_base: str) -> list:
+        ws_url = f"{ws_base}/?zpw_ver={ZALO_CLIENT_VERSION}&zpw_type={ZALO_TYPE}&t={int(time.time() * 1000)}"
+        async with self._ws_connect(ws_url) as ws:
+            raw = await asyncio.wait_for(ws.recv(), timeout=10)
+            body = json.loads(raw[4:].decode("utf-8"))
+            cipher_key = body.get("key")
+            if not cipher_key:
+                raise RuntimeError("Không nhận được cipher_key từ Zalo WebSocket")
+            return await self._sync_offline_pages_async(ws, cipher_key)
 
     def poll_recent_messages(self) -> list:
-        """Lấy 50 tin nhắn nhóm gần nhất qua giao thức Zalo Web (getLoginInfo + WebSocket cmd=511)."""
+        """Lấy toàn bộ tin nhắn nhóm mới nhất qua giao thức Zalo Web (getLoginInfo + phân trang cmd=511)."""
         if not ZALO_COOKIES or not ZALO_IMEI:
             print("ℹ️ Thiếu ZALO_COOKIES hoặc ZALO_IMEI trong .env. Hãy cấu hình đủ 2 biến rồi khởi động lại bot.")
             return []
@@ -444,15 +483,27 @@ class ZaloHTTPCrawler:
             if not cipher_key:
                 raise RuntimeError("Không nhận được cipher_key từ Zalo WebSocket")
 
-            # Kéo batch tin nhắn nhóm gần nhất ngay khi kết nối
-            await ws.send(_make_ws_frame(1, 511, 0, {"blockId": 0, "globalMsgId": 0, "lastActionId": 0}))
+            # 1. Phân trang cmd=511 từ _last_action_id đến tin mới nhất ngay khi kết nối
+            init_texts = await self._sync_offline_pages_async(ws, cipher_key)
+            if init_texts:
+                hl, moi = self._xu_ly_tin_nhan(init_texts)
+                print(f"📩 [Zalo sync] Đọc {len(init_texts)} tin nhóm → {hl} tin xe ghép ({moi} bài mới lưu DB).")
             print("🔌 Đã kết nối Zalo WebSocket thành công — đang lắng nghe tin nhắn nhóm thời gian thực...")
 
             last_ping = time.time()
+            last_sync = time.time()
             while True:
-                if time.time() - last_ping >= 45:
-                    await ws.send(_make_ws_frame(1, 2, 1, {"eventId": int(time.time() * 1000)}))
-                    last_ping = time.time()
+                now = time.time()
+                if now - last_ping >= 45:
+                    await ws.send(_make_ws_frame(1, 2, 1, {"eventId": int(now * 1000)}))
+                    last_ping = now
+                if now - last_sync >= 120:
+                    delta_texts = await self._sync_offline_pages_async(ws, cipher_key, max_pages=10)
+                    if delta_texts:
+                        hl, moi = self._xu_ly_tin_nhan(delta_texts)
+                        if hl > 0:
+                            print(f"📩 [Zalo delta] Đọc {len(delta_texts)} tin mới → {hl} tin xe ghép ({moi} bài mới lưu DB).")
+                    last_sync = time.time()
                 try:
                     frame = await asyncio.wait_for(ws.recv(), timeout=15)
                 except asyncio.TimeoutError:
@@ -467,7 +518,7 @@ class ZaloHTTPCrawler:
                         texts = self._extract_group_texts_from_frame(dec)
                         if texts:
                             hl, moi = self._xu_ly_tin_nhan(texts)
-                            if hl > 0 or cmd == 511:
+                            if hl > 0:
                                 print(f"📩 [Zalo cmd={cmd}] Đọc {len(texts)} tin nhóm → {hl} tin xe ghép ({moi} bài mới lưu DB).")
                     except Exception as e:
                         print(f"⚠️ Lỗi giải mã frame Zalo cmd={cmd}: {e}")
