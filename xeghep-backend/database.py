@@ -1,3 +1,5 @@
+import os
+import time
 import sqlite3
 import queue
 import hashlib
@@ -11,6 +13,13 @@ except ImportError:
     pymysql = None
 
 import config
+
+
+def _is_remote_mysql_configured() -> bool:
+    host = (config.MYSQL_HOST or "").strip().lower()
+    is_render = bool(os.getenv("RENDER") or os.getenv("RENDER_SERVICE_ID"))
+    return is_render or (bool(host) and host not in ("127.0.0.1", "localhost"))
+
 
 def hash_password(raw: str) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
@@ -65,21 +74,31 @@ class MySQLPool:
         self._lock = Lock()
         self._count = 0
 
-    def _create_raw_conn(self):
+    def _create_raw_conn(self, retries: int = 3):
         ssl_kwargs = {}
         if config.MYSQL_HOST and config.MYSQL_HOST not in ["127.0.0.1", "localhost"]:
             ssl_kwargs["ssl"] = {"check_hostname": False}
-        return pymysql.connect(
-            host=config.MYSQL_HOST,
-            port=config.MYSQL_PORT,
-            user=config.MYSQL_USER,
-            password=config.MYSQL_PASSWORD,
-            database=config.MYSQL_DB,
-            charset="utf8mb4",
-            connect_timeout=8,
-            autocommit=False,
-            **ssl_kwargs
-        )
+        last_err = None
+        for attempt in range(1, retries + 1):
+            try:
+                return pymysql.connect(
+                    host=config.MYSQL_HOST,
+                    port=config.MYSQL_PORT,
+                    user=config.MYSQL_USER,
+                    password=config.MYSQL_PASSWORD,
+                    database=config.MYSQL_DB,
+                    charset="utf8mb4",
+                    connect_timeout=15,
+                    read_timeout=30,
+                    write_timeout=30,
+                    autocommit=False,
+                    **ssl_kwargs
+                )
+            except Exception as err:
+                last_err = err
+                if attempt < retries:
+                    time.sleep(attempt)
+        raise last_err
 
     def acquire(self):
         try:
@@ -88,23 +107,22 @@ class MySQLPool:
                 conn.ping(reconnect=True)
                 return conn
             except Exception:
-                try:
-                    conn.close()
-                except Exception:
-                    pass
-                with self._lock:
-                    self._count = max(0, self._count - 1)
+                self.discard(conn)
         except queue.Empty:
             pass
 
+        reserved = False
         with self._lock:
             if self._count < self.maxsize:
                 self._count += 1
-                try:
-                    return self._create_raw_conn()
-                except Exception:
+                reserved = True
+        if reserved:
+            try:
+                return self._create_raw_conn()
+            except Exception:
+                with self._lock:
                     self._count = max(0, self._count - 1)
-                    raise
+                raise
 
         try:
             conn = self._pool.get(timeout=3)
@@ -112,9 +130,19 @@ class MySQLPool:
                 conn.ping(reconnect=True)
                 return conn
             except Exception:
+                self.discard(conn)
                 return self._create_raw_conn()
         except Exception:
             return self._create_raw_conn()
+
+    def discard(self, conn):
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        with self._lock:
+            self._count = max(0, self._count - 1)
 
     def release(self, conn):
         if not conn:
@@ -126,12 +154,7 @@ class MySQLPool:
                 with self._lock:
                     self._count = max(0, self._count - 1)
         except queue.Full:
-            try:
-                conn.close()
-            except Exception:
-                pass
-            with self._lock:
-                self._count = max(0, self._count - 1)
+            self.discard(conn)
 
 
 _mysql_pool = None
@@ -155,25 +178,36 @@ def get_db():
         try:
             conn = _mysql_pool.acquire()
         except Exception as err:
-            print(f"⚠️ Mất kết nối MySQL ({err}) — tự động chuyển sang SQLite ({config.DB_PATH}).")
-            config.DB_TYPE = "sqlite"
+            if _is_remote_mysql_configured():
+                print(f"⚠️ Lỗi tạm thời kết nối MySQL/TiDB ({err}) — giữ nguyên DB_TYPE=mysql, không chuyển sang SQLite.")
+                raise
+            print(f"⚠️ Mất kết nối MySQL local ({err}) — dùng tạm SQLite cho phiên này.")
             with _sqlite_db() as sq_conn:
                 yield sq_conn
             return
 
         wrapper = MySQLWrapper(conn)
+        broken = False
         try:
             yield wrapper
             conn.commit()
-        except Exception:
+        except Exception as err:
+            if isinstance(err, pymysql.MySQLError):
+                broken = True
             try:
                 conn.rollback()
             except Exception:
-                pass
+                broken = True
             raise
         finally:
-            wrapper.close()
-            _mysql_pool.release(conn)
+            try:
+                wrapper.close()
+            except Exception:
+                broken = True
+            if broken:
+                _mysql_pool.discard(conn)
+            else:
+                _mysql_pool.release(conn)
     else:
         with _sqlite_db() as sq_conn:
             yield sq_conn
@@ -302,28 +336,44 @@ def _init_sqlite_db():
 
 
 def init_db():
-    # Luôn đảm bảo SQLite local sẵn sàng làm nguồn dự phòng
-    _init_sqlite_db()
+    # Chỉ khởi tạo SQLite dự phòng ở môi trường local (không chạy SQLite khi đã cấu hình remote MySQL/TiDB)
+    if not _is_remote_mysql_configured():
+        _init_sqlite_db()
 
     if config.DB_TYPE == "mysql":
         if pymysql is None:
             print("⚠️ Chưa cài đặt PyMySQL — tự động sử dụng SQLite (xeghep.db).")
             config.DB_TYPE = "sqlite"
+            _init_sqlite_db()
             return
         try:
             ssl_kwargs = {}
             if config.MYSQL_HOST and config.MYSQL_HOST not in ["127.0.0.1", "localhost"]:
                 ssl_kwargs["ssl"] = {"check_hostname": False}
 
-            my_conn = pymysql.connect(
-                host=config.MYSQL_HOST,
-                port=config.MYSQL_PORT,
-                user=config.MYSQL_USER,
-                password=config.MYSQL_PASSWORD,
-                charset="utf8mb4",
-                connect_timeout=10,
-                **ssl_kwargs
-            )
+            my_conn = None
+            last_err = None
+            for attempt in range(1, 5):
+                try:
+                    my_conn = pymysql.connect(
+                        host=config.MYSQL_HOST,
+                        port=config.MYSQL_PORT,
+                        user=config.MYSQL_USER,
+                        password=config.MYSQL_PASSWORD,
+                        charset="utf8mb4",
+                        connect_timeout=15,
+                        read_timeout=30,
+                        write_timeout=30,
+                        **ssl_kwargs
+                    )
+                    break
+                except Exception as conn_err:
+                    last_err = conn_err
+                    print(f"⚠️ Thử kết nối MySQL lần {attempt}/4 thất bại ({conn_err})...")
+                    if attempt < 4:
+                        time.sleep(attempt * 2)
+            if my_conn is None:
+                raise last_err
             with my_conn.cursor() as cur:
                 cur.execute(f"CREATE DATABASE IF NOT EXISTS {config.MYSQL_DB} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;")
             my_conn.select_db(config.MYSQL_DB)
@@ -477,8 +527,12 @@ def init_db():
             print(f"✅ Đã kết nối cơ sở dữ liệu MySQL ({config.MYSQL_HOST}:{config.MYSQL_PORT}/{config.MYSQL_DB}).")
         except Exception as err:
             print(f"⚠️ Không thể kết nối MySQL tại {config.MYSQL_HOST}:{config.MYSQL_PORT} ({err}).")
-            print(f"💡 Tự động chuyển sang sử dụng SQLite tại: {config.DB_PATH}")
-            config.DB_TYPE = "sqlite"
+            if _is_remote_mysql_configured():
+                print("🔒 Đang cấu hình MySQL/TiDB từ xa — giữ nguyên DB_TYPE=mysql, tự kết nối lại ở request kế tiếp (không rơi sang SQLite).")
+            else:
+                print(f"💡 Tự động chuyển sang sử dụng SQLite tại: {config.DB_PATH}")
+                config.DB_TYPE = "sqlite"
+                _init_sqlite_db()
 
     # Tự động nâng cấp bảng users trong SQLite hỗ trợ các role 'tai_xe', 'khach_hang'
     if config.DB_TYPE == "sqlite":
