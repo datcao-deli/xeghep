@@ -147,6 +147,7 @@ export const api = {
   adminListUsers: (params) => req('/api/admin/users' + (params ? '?' + new URLSearchParams(params).toString() : '')),
   adminCreateUser: (data) => req('/api/admin/users', { method: 'POST', body: JSON.stringify(data) }),
   adminUpdateUser: (userId, data) => req('/api/admin/users/' + userId, { method: 'PUT', body: JSON.stringify(data) }),
+  adminUpdateUserRole: (userId, role) => req('/api/admin/users/' + userId + '/role', { method: 'PUT', body: JSON.stringify({ role }) }),
   adminDeleteUser: (userId) => req('/api/admin/users/' + userId, { method: 'DELETE' }),
   adminUpdateTripStatus: (tripId, data) => req(`/api/admin/trips/${tripId}/status`, { method: 'PUT', body: data }),
   adminUpdateRequestStatus: (requestId, data) => req(`/api/admin/requests/${requestId}/status`, { method: 'PUT', body: data }),

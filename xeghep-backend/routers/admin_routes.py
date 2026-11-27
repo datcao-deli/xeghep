@@ -4,11 +4,13 @@ from fastapi import APIRouter, HTTPException, Depends
 
 import config
 from database import get_db, get_next_id
-from models import AdminCreateUserIn, AdminUpdateUserIn, AdminTripStatusIn, AdminRequestStatusIn
+from models import AdminCreateUserIn, AdminUpdateUserIn, AdminUpdateUserRoleIn, AdminTripStatusIn, AdminRequestStatusIn
 from auth import require_admin, hash_password, _user_cache, _user_cache_time
+from routers.auth_routes import _normalize_phone_vn
 from utils import _dem_theo_nhom, _chuan_hoa_ten_dia_diem, _tien_trinh_dang_chay, get_all_crawlers_status, _tao_link_zalo
 
 router = APIRouter(tags=["Admin"])
+VALID_ROLES = ("admin", "user", "tai_xe", "khach_hang")
 
 @router.get("/api/admin/users")
 async def get_admin_users(
@@ -74,8 +76,8 @@ async def get_admin_users(
 async def create_admin_user(data: AdminCreateUserIn, admin=Depends(require_admin)):
     email_clean = data.email.strip()
     ho_ten_clean = data.ho_ten.strip()
-    sdt_clean = (data.sdt or "").strip()
-    role_clean = (data.role or "user").strip().lower()
+    sdt_clean = _normalize_phone_vn(data.sdt or "")
+    role_clean = (data.role or "khach_hang").strip().lower()
 
     if not ho_ten_clean:
         raise HTTPException(status_code=400, detail="Họ tên không được để trống")
@@ -83,8 +85,8 @@ async def create_admin_user(data: AdminCreateUserIn, admin=Depends(require_admin
         raise HTTPException(status_code=400, detail="Email không được để trống")
     if not data.password:
         raise HTTPException(status_code=400, detail="Mật khẩu không được để trống")
-    if role_clean not in ("admin", "user"):
-        raise HTTPException(status_code=400, detail="Vai trò không hợp lệ (admin hoặc user)")
+    if role_clean not in VALID_ROLES:
+        raise HTTPException(status_code=400, detail="Vai trò không hợp lệ (admin, tai_xe, khach_hang)")
 
     with get_db() as db:
         exists = db.execute("SELECT id FROM users WHERE LOWER(email) = LOWER(?)", (email_clean,)).fetchone()
@@ -129,23 +131,35 @@ async def create_admin_user(data: AdminCreateUserIn, admin=Depends(require_admin
 
 @router.put("/api/admin/users/{user_id}")
 async def update_admin_user(user_id: int, data: AdminUpdateUserIn, admin=Depends(require_admin)):
-    ho_ten_clean = data.ho_ten.strip()
-    sdt_clean = (data.sdt or "").strip()
-    role_clean = (data.role or "user").strip().lower()
-
-    if not ho_ten_clean:
-        raise HTTPException(status_code=400, detail="Họ tên không được để trống")
-    if role_clean not in ("admin", "user"):
-        raise HTTPException(status_code=400, detail="Vai trò không hợp lệ (admin hoặc user)")
-    if (user_id == 1 or str(user_id) == "1") and role_clean != "admin":
-        raise HTTPException(status_code=400, detail="Không thể hạ quyền của tài khoản quản trị viên chính")
-
     with get_db() as db:
         existing = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         if not existing:
             raise HTTPException(status_code=404, detail="Không tìm thấy người dùng")
 
         curr_user_dict = dict(existing)
+        ho_ten_clean = data.ho_ten.strip() if data.ho_ten is not None else (curr_user_dict.get("ho_ten") or "").strip()
+        email_clean = data.email.strip() if data.email is not None else (curr_user_dict.get("email") or "").strip()
+        sdt_clean = _normalize_phone_vn(data.sdt) if data.sdt is not None else _normalize_phone_vn(curr_user_dict.get("sdt") or "")
+        role_clean = data.role.strip().lower() if data.role is not None else (curr_user_dict.get("role") or "khach_hang").strip().lower()
+
+        if not ho_ten_clean:
+            raise HTTPException(status_code=400, detail="Họ tên không được để trống")
+        if not email_clean:
+            raise HTTPException(status_code=400, detail="Email không được để trống")
+        if role_clean not in VALID_ROLES:
+            raise HTTPException(status_code=400, detail="Vai trò không hợp lệ (admin, tai_xe, khach_hang)")
+        if (user_id == 1 or str(user_id) == "1") and role_clean != "admin":
+            raise HTTPException(status_code=400, detail="Không thể hạ quyền của tài khoản quản trị viên chính")
+
+        existing_email = (curr_user_dict.get("email") or "").strip()
+        if email_clean.lower() != existing_email.lower():
+            email_taken = db.execute(
+                "SELECT id FROM users WHERE LOWER(email) = LOWER(?) AND id != ?",
+                (email_clean, user_id),
+            ).fetchone()
+            if email_taken:
+                raise HTTPException(status_code=400, detail="Email này đã được sử dụng bởi người dùng khác")
+
         existing_sdt = _normalize_phone_vn(curr_user_dict.get("sdt") or "")
         if sdt_clean and sdt_clean != existing_sdt:
             phone_taken = db.execute(
@@ -158,13 +172,13 @@ async def update_admin_user(user_id: int, data: AdminUpdateUserIn, admin=Depends
         if data.password and data.password.strip():
             pwd_hash = hash_password(data.password.strip())
             db.execute(
-                "UPDATE users SET ho_ten = ?, sdt = ?, role = ?, password_hash = ? WHERE id = ?",
-                (ho_ten_clean, sdt_clean, role_clean, pwd_hash, user_id)
+                "UPDATE users SET ho_ten = ?, email = ?, sdt = ?, role = ?, password_hash = ? WHERE id = ?",
+                (ho_ten_clean, email_clean, sdt_clean, role_clean, pwd_hash, user_id)
             )
         else:
             db.execute(
-                "UPDATE users SET ho_ten = ?, sdt = ?, role = ? WHERE id = ?",
-                (ho_ten_clean, sdt_clean, role_clean, user_id)
+                "UPDATE users SET ho_ten = ?, email = ?, sdt = ?, role = ? WHERE id = ?",
+                (ho_ten_clean, email_clean, sdt_clean, role_clean, user_id)
             )
 
         row = db.execute(
@@ -191,6 +205,30 @@ async def update_admin_user(user_id: int, data: AdminUpdateUserIn, admin=Depends
     u_dict["sdt"] = u_dict.get("sdt") or ""
     u_dict["so_chuyen"] = int(u_dict.get("so_chuyen") or 0)
     u_dict["so_yeu_cau"] = int(u_dict.get("so_yeu_cau") or 0)
+    return u_dict
+
+@router.put("/api/admin/users/{user_id}/role")
+async def update_admin_user_role(user_id: int, data: AdminUpdateUserRoleIn, admin=Depends(require_admin)):
+    role_clean = (data.role or "").strip().lower()
+    if role_clean not in VALID_ROLES:
+        raise HTTPException(status_code=400, detail="Vai trò không hợp lệ (admin, tai_xe, khach_hang)")
+    if (user_id == 1 or str(user_id) == "1") and role_clean != "admin":
+        raise HTTPException(status_code=400, detail="Không thể hạ quyền của tài khoản quản trị viên chính")
+
+    with get_db() as db:
+        existing = db.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Không tìm thấy người dùng")
+        db.execute("UPDATE users SET role = ? WHERE id = ?", (role_clean, user_id))
+        row = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+
+    _user_cache.pop(str(user_id), None)
+    _user_cache_time.pop(str(user_id), None)
+    _user_cache.pop(user_id, None)
+    _user_cache_time.pop(user_id, None)
+
+    u_dict = dict(row)
+    u_dict.pop("password_hash", None)
     return u_dict
 
 @router.delete("/api/admin/users/{user_id}")

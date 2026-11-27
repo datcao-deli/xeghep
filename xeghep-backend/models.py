@@ -17,15 +17,19 @@ class AdminCreateUserIn(BaseModel):
     email: str
     password: str
     sdt: Optional[str] = None
-    role: str = "user"
+    role: str = "khach_hang"
     avatar_url: Optional[str] = None
 
 class AdminUpdateUserIn(BaseModel):
-    ho_ten: str
+    ho_ten: Optional[str] = None
+    email: Optional[str] = None
     sdt: Optional[str] = None
-    role: str = "user"
+    role: Optional[str] = None
     password: Optional[str] = None
     avatar_url: Optional[str] = None
+
+class AdminUpdateUserRoleIn(BaseModel):
+    role: str
 
 class UserProfileUpdateIn(BaseModel):
     ho_ten: Optional[str] = None
